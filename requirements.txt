@@ -1,0 +1,11 @@
+python-telegram-bot[job-queue]==21.4
+anthropic==0.34.2
+flask==3.0.3
+python-dotenv==1.0.1
+anthropic==0.34.2
+flask==3.0.3
+python-dotenv==1.0.1
+python-telegram-bot[job-queue]==21.4
+telegram
+httpx==0.27.2
+python-telegram-bot[job-queue]==21.4
