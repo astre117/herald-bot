@@ -65,7 +65,8 @@ async def drop_resource_command(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return
 
-    text = " ".join(context.args)
+    text = update.message.text.split(maxsplit=1)[1]
+
     await context.bot.send_message(
         chat_id=config.ANNOUNCEMENT_CHAT_ID,  # same group, different topic
         message_thread_id=config.RESOURCE_TOPIC_ID,
