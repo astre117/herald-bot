@@ -23,7 +23,8 @@ async def announce_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    text = " ".join(context.args)
+    text = update.message.text.split(maxsplit=1)[1]
+
     await context.bot.send_message(
         chat_id=config.ANNOUNCEMENT_CHAT_ID,
         message_thread_id=config.ANNOUNCEMENT_TOPIC_ID,
