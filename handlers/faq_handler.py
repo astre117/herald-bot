@@ -75,8 +75,12 @@ async def handle_business_message(update, context):
             business_connection_id=connection_id,
         )
 
+    
     except Exception:
-    import logging
-    logging.exception("Failed to handle a Telegram Business message")
+        import logging
+        logging.exception(
+            "Failed to handle a Telegram Business message"
+        )
+
     
 
