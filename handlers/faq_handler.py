@@ -78,5 +78,5 @@ async def handle_business_message(update, context):
     except Exception:
     import logging
     logging.exception("Failed to handle a Telegram Business message")
-        )
+    
 
