@@ -32,3 +32,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     answer, source = faq.answer_question(clean_text, update.effective_user.first_name)
     await update.message.reply_text(answer)
+
+
+async def handle_business_message(update, context):
+    """Handle incoming messages from Telegram Business customers."""
+    message = update.business_message
+
+    if not message or not message.text:
+        return
+
+    connection_id = message.business_connection_id
+    if not connection_id:
+        return
+
+    # Avoid responding to messages sent by the business account itself.
+    if message.chat.type == "private" and message.from_user:
+        if message.chat.id != message.from_user.id:
+            return
+
+    text = message.text.strip()
+    if not text:
+        return
+
+    first_name = (
+        message.from_user.first_name
+        if message.from_user
+        else "there"
+    )
+
+    try:
+        await context.bot.send_chat_action(
+            chat_id=message.chat_id,
+            action="typing",
+            business_connection_id=connection_id,
+        )
+
+        answer, source = faq.answer_question(text, first_name)
+
+        await context.bot.send_message(
+            chat_id=message.chat_id,
+            text=answer,
+            business_connection_id=connection_id,
+        )
+
+    except Exception:
+        context.application.logger.exception(
+            "Failed to handle a Telegram Business message"
+        )
+
