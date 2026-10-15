@@ -38,7 +38,7 @@ from handlers.issues import (
     resolve_issue_command,
 )
 from handlers.wins import react_to_win, wins_topic_filter
-from handlers.faq_handler import handle_message
+from handlers.faq_handler import handle_message, handle_business_message
 
 
 STUDENT_COMMANDS = [
@@ -151,6 +151,12 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & wins_topic_filter, react_to_win))
 
     # FAQ — catch-all text handler, must be added last
+    app.add_handler(
+    MessageHandler(
+        filters.UpdateType.BUSINESS_MESSAGE,
+        handle_business_message,
+    )
+)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Background job: check for due reminders every 30 seconds
