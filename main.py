@@ -157,7 +157,13 @@ def main():
     app.job_queue.run_repeating(check_due_reminders, interval=30, first=10)
 
     print("Bot is running...")
-    app.run_polling(allowed_updates=["message"])
+    app.run_polling(
+    allowed_updates=[
+        "message",
+        "business_connection",
+        "business_message",
+    ]
+)
 
 
 if __name__ == "__main__":
