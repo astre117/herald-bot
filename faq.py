@@ -194,7 +194,7 @@ def _clean_sales_reply(raw):
         logging.info("Herald handoff requested: %s", match.group(0))
     text = _HANDOFF_RE.sub("", raw)
     parts = [p.strip() for p in text.split("|||") if p.strip()]
-    return "\n\n".join(parts)
+    return "|||".join(parts[:3])
 
 
 def ask_sales(question, student_name, history):
