@@ -9,7 +9,7 @@ import logging
 import os
 import re
 from anthropic import Anthropic
-
+import settings
 KB_PATH = "knowledge_base.md"
 SALES_KB_PATH = "sales_knowledge_base.md"
 MATCH_THRESHOLD = 0.45  # fraction of question words that must overlap
@@ -198,7 +198,8 @@ def _clean_sales_reply(raw):
 
 
 def ask_sales(question, student_name, history):
-    system_prompt = SALES_PROMPT + load_sales_kb()
+    system_prompt = SALES_PROMPT + load_sales_kb() + settings.live_settings_text()
+
     user_msg = question if not student_name else f"[{student_name} says]: {question}"
 
     messages = list(history or [])
