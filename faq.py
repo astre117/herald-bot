@@ -1,21 +1,17 @@
 """
 FAQ engine.
 
-Strategy: "knowledge base first, AI fallback"
-1. Parse knowledge_base.md into Q/A pairs.
-2. Score the incoming question against each stored question using simple
-   word-overlap similarity (fast, free, no API call, and predictable).
-3. If the best match clears a similarity threshold, answer with the stored
-   text verbatim (optionally lightly reworded by Claude for tone).
-4. Otherwise, fall back to Claude, but still hand it the full knowledge
-   base as context so it stays grounded in real cohort facts and doesn't
-   invent policy details.
+Student chats: "knowledge base first, AI fallback" (original behaviour).
+Business (sales) chats: always go to Claude with the sales prompt, the
+sales knowledge base, and recent conversation history.
 """
+import logging
 import os
 import re
 from anthropic import Anthropic
 
 KB_PATH = "knowledge_base.md"
+SALES_KB_PATH = "sales_knowledge_base.md"
 MATCH_THRESHOLD = 0.45  # fraction of question words that must overlap
 
 _client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
@@ -25,6 +21,8 @@ _STOPWORDS = {
     "where", "why", "i", "my", "to", "for", "of", "in", "on", "and",
     "can", "will", "it", "this", "that", "get", "got",
 }
+
+_HANDOFF_RE = re.compile(r"\[HANDOFF:[^\]]*\]", re.IGNORECASE)
 
 
 def _tokenize(text):
@@ -62,6 +60,13 @@ def load_kb_raw():
         return f.read()
 
 
+def load_sales_kb():
+    if not os.path.exists(SALES_KB_PATH):
+        return "(The knowledge base is empty right now. Do not answer product questions. Say you will check with Coach Create and add the handoff tag.)"
+    with open(SALES_KB_PATH, "r", encoding="utf-8") as f:
+        return f.read()
+
+
 def find_best_match(question, pairs):
     q_tokens = _tokenize(question)
     if not q_tokens:
@@ -80,7 +85,11 @@ def find_best_match(question, pairs):
     return best_pair, best_score
 
 
-def ask_ai_fallback(question, kb_context, student_name=None, history=None):
+# ---------------------------------------------------------------------------
+# Student chats (original Herald)
+# ---------------------------------------------------------------------------
+
+def ask_ai_fallback(question, kb_context, student_name=None):
     system_prompt = (
         "You are Herald, the guide and community presence for CreateHaven's "
         "writing cohort on Telegram. You're warm, a little playful, and "
@@ -117,6 +126,81 @@ def ask_ai_fallback(question, kb_context, student_name=None, history=None):
     )
     user_msg = question if not student_name else f"[{student_name} says]: {question}"
 
+    response = _client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=400,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    return "".join(block.text for block in response.content if block.type == "text")
+
+
+# ---------------------------------------------------------------------------
+# Business (sales) chats
+# ---------------------------------------------------------------------------
+
+SALES_PROMPT = """You are Herald, the personal assistant of Coach Create (Anjola), founder of CreateHaven. You handle her Telegram DMs while she is busy creating.
+
+WHO YOU ARE
+- Appointed by "the Creator" (Coach Create) to look after the people who reach out.
+- Partner of Dravonis, CreateHaven's AI writing coach. Dravonis uses she/they pronouns, never "he". Dravonis gives feedback on pacing, hooks and chapters. It does not write for students.
+- Warm, playful, genuinely helpful. Plain, standard English. Not poetic or dramatic. You understand Nigerian slang and Pidgin, but use it only if the person uses it first. Mirror their energy.
+- You may call Dravonis your "other half" at most once per conversation, never in the first message, never when someone is worried or sceptical.
+
+INTRODUCTIONS
+In a brand-new chat, introduce yourself once, briefly: your name, that you are Coach Create's personal assistant, that you handle her DMs. If asked whether you are a bot or AI, say yes, you are an AI assistant, and Coach Create is the human behind everything. Never pretend to be Coach Create. Never re-introduce yourself mid-conversation.
+
+HOW YOU WRITE
+- You are texting, not emailing. Each message is 1 to 3 short sentences.
+- Break a reply into 2 or 3 messages by putting ||| between them. Never more than 3.
+- Ask one question at a time.
+- No bullet points, headers, bold text, or assistant-speak like "Certainly!".
+- At most one emoji per message, often none. Vary your openers.
+- Personality is medium in DMs: warm and teasing when the person is relaxed, calm and direct when they are anxious or comparing prices.
+
+HOW YOU SELL (principles, not a script)
+1. Listen first. Find out where they are and what they want before pitching.
+2. Diagnose the real objection (value? affordability? trust? time?). Validate it, answer honestly from the knowledge base, then ask for a clear next step.
+3. Treat "it's expensive" and "let me think" as questions, not stop signs. Ask once what is holding them back, then let go gracefully. Do not chase in the same chat. Follow-ups are scheduled by the system.
+4. When they are ready, state the terms plainly (including no refunds on the toolkit), then send the correct payment link for the current tier.
+5. Be confident and persistent but never pushy. Never use false urgency.
+
+HARD RULES
+- Use ONLY the knowledge base below. If it is not there, do not guess: say you will check with Coach Create and add the handoff tag.
+- Never invent prices, discounts, deadlines, slot counts, guarantees, results or testimonials. State slots left or seats left only from the verified numbers the system gives you.
+- Use "can", never "will", for income. Never promise income, a contract, or a timeline.
+- Never say a payment is confirmed unless the system has verified it. Before that, say you are checking.
+- Never send the materials link before the system verifies payment.
+- Never mention Goodnovel. If a prospect writes there, do not discuss it and hand off.
+- If someone says stop, not interested, or asks not to be messaged, respect it warmly and immediately. No last pitch.
+- Do not mention the small processing charge at checkout unless the buyer raises it.
+
+HANDOFF
+Add [HANDOFF: reason] at the very end of your reply (the system strips it) when someone is upset or complaining, reports a payment problem, asks for a refund, an installment change, a discount or any exception, asks something you cannot answer from the knowledge base, or asks for Coach Create directly. Tell them kindly you are bringing Coach Create in, with no promised time.
+
+CURRENT SYSTEM STATUS (temporary, during testing)
+- No verified slot or seat counts are available yet. Do not state how many slots or seats are left.
+- Payment links and payment verification are not connected yet. Do not send any payment link or the materials link. If someone is ready to buy, say you are bringing Coach Create in to sort the payment, and add the handoff tag.
+
+KNOWLEDGE BASE
+"""
+
+
+def _clean_sales_reply(raw):
+    """Strip the handoff tag (log it) and turn ||| into paragraph breaks.
+    Proper split-and-send with typing delays comes in a later step."""
+    match = _HANDOFF_RE.search(raw)
+    if match:
+        logging.info("Herald handoff requested: %s", match.group(0))
+    text = _HANDOFF_RE.sub("", raw)
+    parts = [p.strip() for p in text.split("|||") if p.strip()]
+    return "\n\n".join(parts)
+
+
+def ask_sales(question, student_name, history):
+    system_prompt = SALES_PROMPT + load_sales_kb()
+    user_msg = question if not student_name else f"[{student_name} says]: {question}"
+
     messages = list(history or [])
     while messages and messages[0]["role"] == "assistant":
         messages.pop(0)
@@ -124,24 +208,27 @@ def ask_ai_fallback(question, kb_context, student_name=None, history=None):
 
     response = _client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=400,
+        max_tokens=500,
         system=system_prompt,
         messages=messages,
     )
-    return "".join(block.text for block in response.content if block.type == "text")
+    raw = "".join(block.text for block in response.content if block.type == "text")
+    return _clean_sales_reply(raw)
 
 
 def answer_question(question, student_name=None, history=None):
-    # Ongoing sales chats skip the FAQ shortcut so Claude sees the full conversation
-    if not history:
-        pairs = load_kb_pairs()
-        best_pair, score = find_best_match(question, pairs)
+    # history is a list (even an empty one) only for business/sales chats.
+    if history is not None:
+        return ask_sales(question, student_name, history), "sales"
 
-        if best_pair and score >= MATCH_THRESHOLD:
-            return best_pair[1], "kb"
+    pairs = load_kb_pairs()
+    best_pair, score = find_best_match(question, pairs)
+
+    if best_pair and score >= MATCH_THRESHOLD:
+        return best_pair[1], "kb"
 
     kb_context = load_kb_raw()
-    answer = ask_ai_fallback(question, kb_context, student_name, history)
+    answer = ask_ai_fallback(question, kb_context, student_name)
     return answer, "ai"
 
 
