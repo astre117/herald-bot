@@ -80,7 +80,7 @@ def find_best_match(question, pairs):
     return best_pair, best_score
 
 
-def ask_ai_fallback(question, kb_context, student_name=None):
+def ask_ai_fallback(question, kb_context, student_name=None, history=None):
     system_prompt = (
         "You are Herald, the guide and community presence for CreateHaven's "
         "writing cohort on Telegram. You're warm, a little playful, and "
@@ -117,24 +117,31 @@ def ask_ai_fallback(question, kb_context, student_name=None):
     )
     user_msg = question if not student_name else f"[{student_name} says]: {question}"
 
+    messages = list(history or [])
+    while messages and messages[0]["role"] == "assistant":
+        messages.pop(0)
+    messages.append({"role": "user", "content": user_msg})
+
     response = _client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=400,
         system=system_prompt,
-        messages=[{"role": "user", "content": user_msg}],
+        messages=messages,
     )
     return "".join(block.text for block in response.content if block.type == "text")
 
 
-def answer_question(question, student_name=None):
-    pairs = load_kb_pairs()
-    best_pair, score = find_best_match(question, pairs)
+def answer_question(question, student_name=None, history=None):
+    # Ongoing sales chats skip the FAQ shortcut so Claude sees the full conversation
+    if not history:
+        pairs = load_kb_pairs()
+        best_pair, score = find_best_match(question, pairs)
 
-    if best_pair and score >= MATCH_THRESHOLD:
-        return best_pair[1], "kb"
+        if best_pair and score >= MATCH_THRESHOLD:
+            return best_pair[1], "kb"
 
     kb_context = load_kb_raw()
-    answer = ask_ai_fallback(question, kb_context, student_name)
+    answer = ask_ai_fallback(question, kb_context, student_name, history)
     return answer, "ai"
 
 
