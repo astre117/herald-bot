@@ -1,11 +1,15 @@
 """
-Free Replit instances sleep after inactivity. This tiny Flask server gives
-an external uptime pinger (e.g. UptimeRobot, free tier) something to hit
-every few minutes to keep the Repl awake. Not needed if you're on a paid
-Replit "Always On" plan — see README.
+Tiny web server. It keeps the service reachable and receives Flutterwave
+payment webhooks.
 """
-from flask import Flask
+import logging
+import os
+import json
 from threading import Thread
+
+from flask import Flask, request
+
+import payments
 
 app = Flask(__name__)
 
@@ -15,8 +19,30 @@ def home():
     return "CreateHaven cohort bot is alive."
 
 
+@app.route("/flutterwave-webhook", methods=["POST"])
+def flutterwave_webhook():
+    raw = request.get_data()
+
+    if not payments.signature_ok(request.headers, raw):
+        return "forbidden", 401
+
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return "bad request", 400
+
+    try:
+        payments.process_webhook(payload)
+    except Exception:
+        logging.exception("Flutterwave webhook failed")
+        return "error", 500  # makes Flutterwave retry later
+
+    return "ok", 200
+
+
 def run():
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
 
 
 def keep_alive():
