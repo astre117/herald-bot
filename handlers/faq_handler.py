@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from telegram import Update
@@ -35,6 +36,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     answer, source = faq.answer_question(clean_text, update.effective_user.first_name)
     await update.message.reply_text(answer)
+
+
+def _split_chunks(answer):
+    """Split a reply on ||| into at most 3 non-empty chunks."""
+    chunks = [c.strip() for c in answer.split("|||") if c.strip()]
+    return chunks[:3] or [answer.strip()]
+
+
+def _typing_delay(chunk):
+    """1 to 3 seconds, longer for longer chunks."""
+    return min(3.0, 1.0 + len(chunk) / 60)
 
 
 async def handle_business_message(update, context):
@@ -82,15 +94,27 @@ async def handle_business_message(update, context):
         )
 
         answer, source = faq.answer_question(text, first_name, history)
+        chunks = _split_chunks(answer)
 
-        sent = await context.bot.send_message(
-            chat_id=chat_id,
-            text=answer,
-            business_connection_id=connection_id,
-        )
+        last_sent_id = None
+        for i, chunk in enumerate(chunks):
+            if i > 0:
+                await context.bot.send_chat_action(
+                    chat_id=chat_id,
+                    action="typing",
+                    business_connection_id=connection_id,
+                )
+            await asyncio.sleep(_typing_delay(chunk))
+            sent = await context.bot.send_message(
+                chat_id=chat_id,
+                text=chunk,
+                business_connection_id=connection_id,
+            )
+            last_sent_id = sent.message_id
 
+        # Saved with ||| between chunks so Claude keeps seeing the format.
         conversations.save_message(
-            chat_id, "assistant", answer, sent.message_id
+            chat_id, "assistant", "|||".join(chunks), last_sent_id
         )
 
     except Exception:
