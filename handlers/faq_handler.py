@@ -1,12 +1,19 @@
 import asyncio
+import html
 import logging
+from datetime import date
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
+import config
 import faq
 import conversations
 import settings
+
+# Remembers which alerts were already sent today, so you don't get spammed.
+_alerted = {}
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -38,6 +45,99 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     answer, source = faq.answer_question(clean_text, update.effective_user.first_name)
     await update.message.reply_text(answer)
 
+
+# ---------------------------------------------------------------------------
+# Control chat: alerts, Take over / Resume buttons, global off switch
+# ---------------------------------------------------------------------------
+
+async def _notify_admins(bot, text, reply_markup=None, parse_mode=None):
+    for admin_id in config.ADMIN_USER_IDS:
+        try:
+            await bot.send_message(
+                chat_id=admin_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+        except Exception:
+            logging.exception("Could not notify admin %s", admin_id)
+
+
+async def _alert_once_a_day(bot, kind, text):
+    today = date.today().isoformat()
+    if _alerted.get(kind) == today:
+        return
+    _alerted[kind] = today
+    await _notify_admins(bot, text)
+
+
+async def _send_handoff(bot, chat_id, first_name, reason):
+    recent = conversations.get_recent(chat_id, limit=6)
+    lines = []
+    for m in recent:
+        who = "Customer" if m["role"] == "user" else "Herald"
+        content = m["content"].replace("|||", " / ")
+        if len(content) > 200:
+            content = content[:200] + "..."
+        lines.append(f"{who}: {html.escape(content)}")
+
+    text = (
+        f"Herald needs you: <b>{html.escape(first_name)}</b>\n"
+        f"Reason: {html.escape(reason)}\n\n"
+        + "\n".join(lines)
+        + f'\n\n<a href="tg://user?id={chat_id}">Open chat</a>'
+    )
+    markup = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Take over", callback_data=f"take:{chat_id}"),
+        InlineKeyboardButton("Resume Herald", callback_data=f"resume:{chat_id}"),
+    ]])
+    await _notify_admins(bot, text, reply_markup=markup, parse_mode=ParseMode.HTML)
+
+
+async def handle_control_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query or not query.data:
+        return
+    if not config.is_admin(query.from_user.id):
+        await query.answer("Admins only.", show_alert=True)
+        return
+
+    action, _, raw_id = query.data.partition(":")
+    try:
+        chat_id = int(raw_id)
+    except ValueError:
+        await query.answer()
+        return
+
+    if action == "take":
+        conversations.pause_chat(chat_id)
+        await query.answer("Herald is silenced in this chat.")
+    elif action == "resume":
+        conversations.resume_chat(chat_id)
+        await query.answer("Herald is back on in this chat.")
+    else:
+        await query.answer()
+
+
+async def herald_off_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not config.is_admin(update.effective_user.id):
+        return
+    conversations.pause_chat(0)  # 0 = every chat
+    await update.message.reply_text(
+        "Herald is OFF in every chat. Send /heraldon to turn her back on."
+    )
+
+
+async def herald_on_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not config.is_admin(update.effective_user.id):
+        return
+    conversations.resume_chat(0)
+    await update.message.reply_text("Herald is ON again.")
+
+
+# ---------------------------------------------------------------------------
+# Business (customer) messages
+# ---------------------------------------------------------------------------
 
 def _split_chunks(answer):
     """Split a reply on ||| into at most 3 non-empty chunks."""
@@ -88,14 +188,26 @@ async def handle_business_message(update, context):
             # Telegram sent this exact message twice. Ignore it.
             return
 
-        # Global off switch (settings.txt)
-        if not settings.is_on():
+        # Global off switch (settings.txt, or /heraldoff)
+        if not settings.is_on() or conversations.is_paused(0):
             logging.info("Herald is switched off; not replying")
+            return
+
+        # Per-chat pause (Take over button)
+        if conversations.is_paused(chat_id):
+            logging.info("Chat %s is paused; not replying", chat_id)
             return
 
         # Daily reply cap (settings.txt)
         if conversations.count_replies_today() >= settings.daily_cap():
             logging.warning("Daily reply cap reached; not replying")
+            await _alert_once_a_day(
+                context.bot,
+                "cap",
+                "Herald has hit today's reply cap and has gone quiet in all "
+                "chats. Raise daily_reply_cap in settings.txt if you want "
+                "her to continue.",
+            )
             return
 
         await context.bot.send_chat_action(
@@ -128,5 +240,18 @@ async def handle_business_message(update, context):
             chat_id, "assistant", "|||".join(chunks), last_sent_id
         )
 
-    except Exception:
+        # Tell the admins if Herald asked for a human.
+        if source.startswith("handoff:"):
+            await _send_handoff(
+                context.bot, chat_id, first_name, source[len("handoff:"):]
+            )
+
+    except Exception as e:
         logging.exception("Failed to handle a Telegram Business message")
+        if "credit balance" in str(e).lower():
+            await _alert_once_a_day(
+                context.bot,
+                "credits",
+                "Herald's Anthropic credits have run out, so she can't "
+                "reply. Please top up your credits.",
+            )
