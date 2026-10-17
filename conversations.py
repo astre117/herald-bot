@@ -50,3 +50,12 @@ def get_recent(chat_id, limit=12):
             (chat_id, limit),
         ).fetchall()
     return [{"role": r[0], "content": r[1]} for r in reversed(rows)]
+
+
+def count_replies_today():
+    with closing(_conn()) as c:
+        row = c.execute(
+            "SELECT COUNT(*) FROM conversations "
+            "WHERE role = 'assistant' AND date(created_at) = date('now')"
+        ).fetchone()
+    return row[0]
