@@ -10,6 +10,7 @@ import os
 import re
 from anthropic import Anthropic
 import settings
+
 KB_PATH = "knowledge_base.md"
 SALES_KB_PATH = "sales_knowledge_base.md"
 MATCH_THRESHOLD = 0.45  # fraction of question words that must overlap
@@ -22,7 +23,7 @@ _STOPWORDS = {
     "can", "will", "it", "this", "that", "get", "got",
 }
 
-_HANDOFF_RE = re.compile(r"\[HANDOFF:[^\]]*\]", re.IGNORECASE)
+_HANDOFF_RE = re.compile(r"\[HANDOFF:([^\]]*)\]", re.IGNORECASE)
 
 
 def _tokenize(text):
@@ -187,19 +188,21 @@ KNOWLEDGE BASE
 
 
 def _clean_sales_reply(raw):
-    """Strip the handoff tag (log it) and turn ||| into paragraph breaks.
-    Proper split-and-send with typing delays comes in a later step."""
+    """Strip the handoff tag. Returns (text with ||| kept, handoff reason or None)."""
+    reason = None
     match = _HANDOFF_RE.search(raw)
     if match:
-        logging.info("Herald handoff requested: %s", match.group(0))
+        reason = match.group(1).strip() or "no reason given"
+        logging.info("Herald handoff requested: %s", reason)
     text = _HANDOFF_RE.sub("", raw)
     parts = [p.strip() for p in text.split("|||") if p.strip()]
-    return "|||".join(parts[:3])
+    if not parts:
+        parts = ["Let me bring Coach Create in on this."]
+    return "|||".join(parts[:3]), reason
 
 
 def ask_sales(question, student_name, history):
     system_prompt = SALES_PROMPT + load_sales_kb() + settings.live_settings_text()
-
     user_msg = question if not student_name else f"[{student_name} says]: {question}"
 
     messages = list(history or [])
@@ -220,7 +223,10 @@ def ask_sales(question, student_name, history):
 def answer_question(question, student_name=None, history=None):
     # history is a list (even an empty one) only for business/sales chats.
     if history is not None:
-        return ask_sales(question, student_name, history), "sales"
+        text, reason = ask_sales(question, student_name, history)
+        if reason:
+            return text, "handoff:" + reason
+        return text, "sales"
 
     pairs = load_kb_pairs()
     best_pair, score = find_best_match(question, pairs)
