@@ -1,8 +1,11 @@
+import logging
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
 import faq
 import conversations
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Herald is fully conversational in DMs — every message gets a real
@@ -60,7 +63,7 @@ async def handle_business_message(update, context):
         else "there"
     )
 
-        try:
+    try:
         chat_id = message.chat_id
 
         # Load earlier messages first, then save this one.
@@ -91,11 +94,4 @@ async def handle_business_message(update, context):
         )
 
     except Exception:
-        import logging
-        logging.exception(
-            "Failed to handle a Telegram Business message"
-        )
-
-
-    
-
+        logging.exception("Failed to handle a Telegram Business message")
