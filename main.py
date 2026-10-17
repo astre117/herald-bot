@@ -1,11 +1,11 @@
 from telegram import BotCommand, BotCommandScopeDefault, BotCommandScopeChat
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
     filters,
 )
-
 import config
 import db
 import conversations
@@ -41,8 +41,13 @@ from handlers.issues import (
     resolve_issue_command,
 )
 from handlers.wins import react_to_win, wins_topic_filter
-from handlers.faq_handler import handle_message, handle_business_message
-
+from handlers.faq_handler import (
+    handle_message,
+    handle_business_message,
+    handle_control_buttons,
+    herald_off_command,
+    herald_on_command,
+)
 
 STUDENT_COMMANDS = [
     BotCommand("start", "Say hello to Herald and get started"),
@@ -150,6 +155,9 @@ def main():
 
     # Misc
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("heraldoff", herald_off_command))
+    app.add_handler(CommandHandler("heraldon", herald_on_command))
+    app.add_handler(CallbackQueryHandler(handle_control_buttons, pattern=r"^(take|resume):"))
 
     # Wins & Testimonials — must come BEFORE the FAQ catch-all so wins
     # posts get Herald's celebration instead of a generic FAQ attempt
@@ -173,6 +181,7 @@ def main():
         "message",
         "business_connection",
         "business_message",
+        "callback_query",
     ]
 )
 
