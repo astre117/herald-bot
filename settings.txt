@@ -5,3 +5,7 @@ toolkit_tier=1
 cohort_price=60000
 # cohort_free_seats_taken: how many of the 150 free Dravonis seats are gone
 cohort_free_seats_taken=0
+# herald_on: yes or no. "no" silences Herald in every chat
+herald_on=yes
+# daily_reply_cap: max replies Herald sends per day (all chats combined)
+daily_reply_cap=150
