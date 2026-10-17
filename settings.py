@@ -77,3 +77,14 @@ def live_settings_text():
         "someone is ready to buy, say you are bringing Coach Create in and "
         "add the handoff tag.\n"
     )
+
+
+def is_on():
+    return _read().get("herald_on", "yes").lower() != "no"
+
+
+def daily_cap():
+    try:
+        return int(_read().get("daily_reply_cap", "150"))
+    except ValueError:
+        return 150
