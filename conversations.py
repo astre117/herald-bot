@@ -59,3 +59,31 @@ def count_replies_today():
             "WHERE role = 'assistant' AND date(created_at) = date('now')"
         ).fetchone()
     return row[0]
+
+
+def _paused_conn():
+    c = _conn()
+    c.execute(
+        "CREATE TABLE IF NOT EXISTS paused_chats ("
+        "chat_id INTEGER PRIMARY KEY, "
+        "paused_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+    )
+    return c
+
+
+def pause_chat(chat_id):
+    with closing(_paused_conn()) as c:
+        c.execute("INSERT OR IGNORE INTO paused_chats (chat_id) VALUES (?)", (chat_id,))
+        c.commit()
+
+
+def resume_chat(chat_id):
+    with closing(_paused_conn()) as c:
+        c.execute("DELETE FROM paused_chats WHERE chat_id = ?", (chat_id,))
+        c.commit()
+
+
+def is_paused(chat_id):
+    with closing(_paused_conn()) as c:
+        row = c.execute("SELECT 1 FROM paused_chats WHERE chat_id = ?", (chat_id,)).fetchone()
+    return row is not None
