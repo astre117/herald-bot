@@ -8,8 +8,11 @@ from telegram.ext import (
 
 import config
 import db
+import conversations
 from keep_alive import keep_alive
 
+import conversations
+import conversations
 import handlers.onboarding as onboarding
 from handlers.onboarding import (
     welcome_new_member,
@@ -102,6 +105,8 @@ async def start_command(update, context):
 
 def main():
     db.init_db()
+    conversations.init_conversations()
+
     seeded, skipped = db.seed_pool_from_file("seed_ids.txt")
     if seeded:
         print(f"Seeded {len(seeded)} Dravonis ID(s) into the pool from seed_ids.txt")
