@@ -1,0 +1,7 @@
+# Herald live settings. Edit the numbers only, keep the names.
+# toolkit_tier: 1 to 6 (1 = slots 1-50, 2 = 51-100, and so on)
+toolkit_tier=1
+# cohort_price: the full Cohort price in naira, numbers only
+cohort_price=60000
+# cohort_free_seats_taken: how many of the 150 free Dravonis seats are gone
+cohort_free_seats_taken=0
