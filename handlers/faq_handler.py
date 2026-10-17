@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes
 
 import faq
 import conversations
+import settings
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -85,6 +86,16 @@ async def handle_business_message(update, context):
         )
         if not is_new:
             # Telegram sent this exact message twice. Ignore it.
+            return
+
+        # Global off switch (settings.txt)
+        if not settings.is_on():
+            logging.info("Herald is switched off; not replying")
+            return
+
+        # Daily reply cap (settings.txt)
+        if conversations.count_replies_today() >= settings.daily_cap():
+            logging.warning("Daily reply cap reached; not replying")
             return
 
         await context.bot.send_chat_action(
