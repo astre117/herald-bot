@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 import faq
-
+import conversations
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Herald is fully conversational in DMs — every message gets a real
@@ -60,27 +60,42 @@ async def handle_business_message(update, context):
         else "there"
     )
 
-    try:
+        try:
+        chat_id = message.chat_id
+
+        # Load earlier messages first, then save this one.
+        history = conversations.get_recent(chat_id, limit=12)
+        is_new = conversations.save_message(
+            chat_id, "user", text, message.message_id
+        )
+        if not is_new:
+            # Telegram sent this exact message twice. Ignore it.
+            return
+
         await context.bot.send_chat_action(
-            chat_id=message.chat_id,
+            chat_id=chat_id,
             action="typing",
             business_connection_id=connection_id,
         )
 
-        answer, source = faq.answer_question(text, first_name)
+        answer, source = faq.answer_question(text, first_name, history)
 
-        await context.bot.send_message(
-            chat_id=message.chat_id,
+        sent = await context.bot.send_message(
+            chat_id=chat_id,
             text=answer,
             business_connection_id=connection_id,
         )
 
-    
+        conversations.save_message(
+            chat_id, "assistant", answer, sent.message_id
+        )
+
     except Exception:
         import logging
         logging.exception(
             "Failed to handle a Telegram Business message"
         )
+
 
     
 
