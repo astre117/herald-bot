@@ -9,6 +9,7 @@ from telegram.ext import (
 import config
 import db
 import conversations
+import payments
 from keep_alive import keep_alive
 
 import conversations
@@ -174,6 +175,8 @@ def main():
 
     # Background job: check for due reminders every 30 seconds
     app.job_queue.run_repeating(check_due_reminders, interval=30, first=10)
+    app.job_queue.run_repeating(payments.sync_job, interval=300, first=30)
+
 
     print("Bot is running...")
     app.run_polling(
