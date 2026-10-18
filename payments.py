@@ -118,7 +118,19 @@ def _record(row):
         )
         c.commit()
         if cur.rowcount != 1:
-            return None
+            # Already recorded earlier. If it was ignored before test mode
+            # was on, upgrade it so it can be alerted and claimed.
+            if is_toolkit == 2:
+                up = c.execute(
+                    "UPDATE payments SET is_toolkit = 2 "
+                    "WHERE flw_id = ? AND is_toolkit = 0",
+                    (flw_id,),
+                )
+                c.commit()
+                if up.rowcount != 1:
+                    return None
+            else:
+                return None
 
     return {
         "flw_id": flw_id,
