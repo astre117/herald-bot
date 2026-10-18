@@ -13,8 +13,6 @@ import db
 
 # The six toolkit tier prices, in naira.
 TOOLKIT_AMOUNTS = {15000, 20000, 25000, 30000, 35000, 40000}
-# During testing you also get alerts for a 100 naira test payment.
-ALERT_AMOUNTS = TOOLKIT_AMOUNTS | {100}
 
 
 def _conn():
@@ -82,10 +80,17 @@ def _fetch(days_back, email=None, max_pages=20):
 
 
 def _is_toolkit(amount, tx_ref):
-    """Optional filter: set TOOLKIT_TXREF_PREFIX in Railway if toolkit
-    payments share a reference prefix, so other payments are ignored."""
+    """Returns 1 for a toolkit sale, 2 for a test payment, 0 for anything else.
+    Test mode: set TEST_PAYMENT_AMOUNT in Railway (for example 100).
+    Optional: set TOOLKIT_TXREF_PREFIX if toolkit payments share a reference
+    prefix, so other payments are ignored."""
+    test_amount = os.environ.get("TEST_PAYMENT_AMOUNT", "").strip()
+    if test_amount.isdigit() and amount == int(test_amount):
+        return 2
+
     if amount not in TOOLKIT_AMOUNTS:
         return 0
+
     prefix = os.environ.get("TOOLKIT_TXREF_PREFIX", "")
     if prefix and not (tx_ref or "").startswith(prefix):
         return 0
@@ -125,6 +130,7 @@ def _record(row):
 
 
 def toolkit_count():
+    """Real toolkit sales only. Test payments are not counted."""
     with closing(_conn()) as c:
         return c.execute(
             "SELECT COUNT(*) FROM payments WHERE is_toolkit = 1"
@@ -159,12 +165,12 @@ async def sync_job(context):
         return
 
     for p in new:
-        if p["amount"] not in ALERT_AMOUNTS:
+        if not p["is_toolkit"]:
             continue
-        if p["is_toolkit"]:
-            note = f"Toolkit payment #{toolkit_count()}."
+        if p["is_toolkit"] == 2:
+            note = "TEST payment. Not counted toward slots."
         else:
-            note = "Not counted as a toolkit sale."
+            note = f"Toolkit payment #{toolkit_count()}."
         text = (
             f"New payment: ₦{p['amount']:,} from {p['email'] or 'unknown email'}.\n"
             f"{note}\nRef: {p['tx_ref']}"
@@ -176,7 +182,6 @@ async def sync_job(context):
                 logging.exception("Could not notify admin %s", admin_id)
 
 
-
 def claim_email(email, chat_id):
     """Returns 'ok', 'none' or 'taken'."""
     email = email.strip().lower()
@@ -185,7 +190,7 @@ def claim_email(email, chat_id):
         with closing(_conn()) as c:
             rows = c.execute(
                 "SELECT id, claimed_by_chat_id FROM payments "
-                "WHERE email = ? AND is_toolkit = 1",
+                "WHERE email = ? AND is_toolkit IN (1, 2)",
                 (email,),
             ).fetchall()
 
