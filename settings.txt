@@ -9,3 +9,14 @@ cohort_free_seats_taken=0
 herald_on=yes
 # daily_reply_cap: max replies Herald sends per day (all chats combined)
 daily_reply_cap=150
+# toolkit_count_adjust: added to the bot's recorded toolkit payments. Set so the total matches the real number of toolkit sales (can be negative)
+toolkit_count_adjust=0
+# announce_slots_left: yes or no. Keep "no" until /toolkitstatus shows the right numbers
+announce_slots_left=no
+# Payment links, one per tier. Leave blank until created
+link_tier_1=https://flutterwave.com/pay/createhaven-starter-toolkit
+link_tier_2=
+link_tier_3=
+link_tier_4=
+link_tier_5=
+link_tier_6=

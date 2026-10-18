@@ -1,15 +1,17 @@
 import os
 
+import payments
+
 SETTINGS_PATH = "settings.txt"
 
-# tier: (price, slot range)
+# tier: (price, slot range label, last slot of the tier or None)
 TIERS = {
-    1: (15000, "1-50"),
-    2: (20000, "51-100"),
-    3: (25000, "101-150"),
-    4: (30000, "151-200"),
-    5: (35000, "201-250"),
-    6: (40000, "251+"),
+    1: (15000, "1-50", 50),
+    2: (20000, "51-100", 100),
+    3: (25000, "101-150", 150),
+    4: (30000, "151-200", 200),
+    5: (35000, "201-250", 250),
+    6: (40000, "251+", None),
 }
 
 
@@ -27,23 +29,105 @@ def _read():
     return values
 
 
+def _int(values, key, default=0):
+    try:
+        return int(values.get(key, default))
+    except ValueError:
+        return default
+
+
+def is_on():
+    return _read().get("herald_on", "yes").lower() != "no"
+
+
+def daily_cap():
+    return _int(_read(), "daily_reply_cap", 150)
+
+
+def tier_link(tier):
+    return _read().get(f"link_tier_{tier}", "").strip()
+
+
+def tier_info():
+    v = _read()
+    sold = max(0, payments.toolkit_count() + _int(v, "toolkit_count_adjust"))
+    tier = min(6, sold // 50 + 1)
+    price, slots, last = TIERS[tier]
+    return {
+        "sold": sold,
+        "tier": tier,
+        "price": price,
+        "slots": slots,
+        "left": (last - sold) if last else None,
+        "link": tier_link(tier),
+    }
+
+
+def next_link_warning():
+    info = tier_info()
+    if info["left"] is None:
+        return None
+    nxt = info["tier"] + 1
+    if info["left"] <= 10 and not tier_link(nxt):
+        return (
+            f"Heads up: only {info['left']} slots left at the current price, "
+            f"and link_tier_{nxt} is empty in settings.txt. Create that "
+            f"Flutterwave link and add it before the tier fills."
+        )
+    return None
+
+
+def status_report():
+    v = _read()
+    info = tier_info()
+    lines = [
+        f"Toolkit payments recorded by the bot: {payments.toolkit_count()}",
+        f"Adjustment in settings.txt: {_int(v, 'toolkit_count_adjust')}",
+        f"Counted as sold: {info['sold']}",
+        f"Current tier: {info['tier']} (₦{info['price']:,}, slots {info['slots']})",
+    ]
+    if info["left"] is not None:
+        lines.append(f"Slots left at this price: {info['left']}")
+    lines.append(
+        "Payment link for this tier: " + ("set" if info["link"] else "MISSING")
+    )
+    lines.append("Announcing slots left: " + v.get("announce_slots_left", "no"))
+    warning = next_link_warning()
+    if warning:
+        lines.append(warning)
+    return "\n".join(lines)
+
+
 def live_settings_text():
     v = _read()
-    lines = []
+    info = tier_info()
+    lines = [
+        f"- Current Starter Toolkit price: ₦{info['price']:,} (launch tier "
+        f"{info['tier']}, slots {info['slots']}). Quote only this price."
+    ]
 
-    try:
-        tier = int(v["toolkit_tier"])
-        price, slots = TIERS[tier]
+    if info["link"]:
         lines.append(
-            f"- Current Starter Toolkit price: ₦{price:,} (tier {tier}, "
-            f"slots {slots}). Quote this price when asked. Do not say how "
-            f"many slots are left."
+            f"- Payment link for the current tier: {info['link']}\n"
+            "  Send it only when the buyer is ready to pay AND you have "
+            "already stated the terms plainly (one payment, no installments, "
+            "no refunds). Send the link exactly as written."
         )
-    except (KeyError, ValueError):
+    else:
         lines.append(
-            "- The toolkit price is unavailable. Say you are confirming it "
-            "with Coach Create and add the handoff tag."
+            "- No payment link is available right now. If the buyer is ready "
+            "to pay, say you are bringing Coach Create in to sort the "
+            "payment, and add the handoff tag."
         )
+
+    if v.get("announce_slots_left", "no").lower() == "yes" and info["left"] is not None:
+        lines.append(
+            f"- Slots left at the current price: {info['left']}. You may "
+            "mention this honestly when it is relevant. Never use it to "
+            "pressure anyone."
+        )
+    else:
+        lines.append("- Do not say how many slots are left.")
 
     try:
         cohort = int(v["cohort_price"])
@@ -69,22 +153,12 @@ def live_settings_text():
 
     return (
         "\n\nLIVE SETTINGS (these are current and override any earlier note "
-        "in this prompt or the knowledge base saying prices or seat counts "
-        "are unavailable):\n"
+        "in this prompt or the knowledge base saying prices, links or seat "
+        "counts are unavailable):\n"
         + "\n".join(lines)
         + "\n- Never describe any figure as verified or verifiable."
-        + "\n- Still do not send any payment link or materials link. If "
-        "someone is ready to buy, say you are bringing Coach Create in and "
-        "add the handoff tag.\n"
+        + "\n- After a buyer says they have paid, ask for the email they used "
+        "at checkout. The system checks it and sends the materials "
+        "automatically. Never send the materials link yourself and never "
+        "say a payment is confirmed.\n"
     )
-
-
-def is_on():
-    return _read().get("herald_on", "yes").lower() != "no"
-
-
-def daily_cap():
-    try:
-        return int(_read().get("daily_reply_cap", "150"))
-    except ValueError:
-        return 150

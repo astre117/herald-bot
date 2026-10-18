@@ -335,3 +335,18 @@ async def handle_business_message(update, context):
                 "Herald's Anthropic credits have run out, so she can't "
                 "reply. Please top up your credits.",
             )
+async def toolkit_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not config.is_admin(update.effective_user.id):
+        return
+    await update.message.reply_text(settings.status_report())
+
+
+async def link_check_job(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        warning = settings.next_link_warning()
+    except Exception:
+        logging.exception("Link check failed")
+        return
+    if warning:
+        await _alert_once_a_day(context.bot, "link-warning", warning)
+
