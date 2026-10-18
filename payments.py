@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import sqlite3
+import urllib.error
 import urllib.parse
 import urllib.request
 from contextlib import closing
@@ -32,21 +33,17 @@ def _conn():
     return c
 
 
-def _fetch(days_back, email=None, max_pages=20):
-    """Ask Flutterwave for successful naira payments. Their answer is the proof."""
+def _fetch_range(start, end, email=None, max_pages=20):
     key = os.environ.get("FLW_SECRET_KEY", "")
     if not key:
         logging.error("FLW_SECRET_KEY is not set")
         return []
 
-    today = date.today()
-    start = (today - timedelta(days=days_back)).isoformat()
     results = []
-
     for page in range(1, max_pages + 1):
         params = {
-            "from": start,
-            "to": today.isoformat(),
+            "from": start.isoformat(),
+            "to": end.isoformat(),
             "status": "successful",
             "currency": "NGN",
             "page": page,
@@ -79,16 +76,36 @@ def _fetch(days_back, email=None, max_pages=20):
     ]
 
 
-def _is_toolkit(amount, tx_ref):
+def _fetch(days_back, email=None):
+    """Ask Flutterwave for successful naira payments. Their answer is the proof."""
+    today = date.today()
+    start = today - timedelta(days=days_back)
+    try:
+        # Tomorrow's date makes sure today's payments are included.
+        return _fetch_range(start, today + timedelta(days=1), email)
+    except urllib.error.HTTPError as e:
+        logging.warning("Fetch with tomorrow's date failed (%s), retrying", e.code)
+        return _fetch_range(start, today, email)
+
+
+def _near(value, target):
+    """True if value is the target price, or the price plus a small checkout
+    fee paid by the customer (up to 4 percent)."""
+    return target <= value <= target * 1.04
+
+
+def _is_toolkit(amounts, tx_ref):
     """Returns 1 for a toolkit sale, 2 for a test payment, 0 for anything else.
-    Test mode: set TEST_PAYMENT_AMOUNT in Railway (for example 100).
+    Test mode: set TEST_PAYMENT_AMOUNT in Railway (for example 300).
     Optional: set TOOLKIT_TXREF_PREFIX if toolkit payments share a reference
     prefix, so other payments are ignored."""
     test_amount = os.environ.get("TEST_PAYMENT_AMOUNT", "").strip()
-    if test_amount.isdigit() and amount == int(test_amount):
-        return 2
+    if test_amount.isdigit():
+        target = int(test_amount)
+        if any(_near(a, target) for a in amounts):
+            return 2
 
-    if amount not in TOOLKIT_AMOUNTS:
+    if not any(_near(a, t) for a in amounts for t in TOOLKIT_AMOUNTS):
         return 0
 
     prefix = os.environ.get("TOOLKIT_TXREF_PREFIX", "")
@@ -105,9 +122,14 @@ def _record(row):
     except (KeyError, TypeError, ValueError):
         return None
 
+    try:
+        charged = int(round(float(row.get("charged_amount"))))
+    except (TypeError, ValueError):
+        charged = amount
+
     email = ((row.get("customer") or {}).get("email") or "").strip().lower()
     tx_ref = row.get("tx_ref") or ""
-    is_toolkit = _is_toolkit(amount, tx_ref)
+    is_toolkit = _is_toolkit([amount, charged], tx_ref)
 
     with closing(_conn()) as c:
         cur = c.execute(
@@ -147,6 +169,25 @@ def toolkit_count():
         return c.execute(
             "SELECT COUNT(*) FROM payments WHERE is_toolkit = 1"
         ).fetchone()[0]
+
+
+def recent_payments_text(limit=6):
+    with closing(_conn()) as c:
+        rows = c.execute(
+            "SELECT amount, is_toolkit, email, tx_ref, created_at "
+            "FROM payments ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    if not rows:
+        return "No payments recorded yet."
+    kinds = {0: "other", 1: "toolkit", 2: "TEST"}
+    lines = []
+    for amount, kind, email, ref, created in rows:
+        lines.append(
+            f"₦{amount:,} | {kinds.get(kind, '?')} | {email or 'no email'} | "
+            f"{created} UTC | ref: {ref}"
+        )
+    return "Last recorded payments:\n" + "\n".join(lines)
 
 
 def sync_recent(days_back=2):
