@@ -10,6 +10,7 @@ import config
 import db
 import conversations
 import payments
+import followups
 from keep_alive import keep_alive
 
 import conversations
@@ -50,6 +51,7 @@ from handlers.faq_handler import (
     herald_on_command,
     toolkit_status_command,
     payments_command,
+    followups_command,
     link_check_job,
 
 )
@@ -164,6 +166,7 @@ def main():
     app.add_handler(CommandHandler("heraldon", herald_on_command))
     app.add_handler(CommandHandler("toolkitstatus", toolkit_status_command))
     app.add_handler(CommandHandler("payments", payments_command))
+    app.add_handler(CommandHandler("followups", followups_command))
 
     app.add_handler(CallbackQueryHandler(handle_control_buttons, pattern=r"^(take|resume):"))
 
@@ -184,6 +187,7 @@ def main():
     app.job_queue.run_repeating(check_due_reminders, interval=30, first=10)
     app.job_queue.run_repeating(payments.sync_job, interval=300, first=30)
     app.job_queue.run_repeating(link_check_job, interval=3600, first=120)
+    app.job_queue.run_repeating(followups.followup_job, interval=180, first=240)
 
 
 
