@@ -49,6 +49,7 @@ from handlers.faq_handler import (
     herald_off_command,
     herald_on_command,
     toolkit_status_command,
+    payments_command,
     link_check_job,
 
 )
@@ -162,6 +163,7 @@ def main():
     app.add_handler(CommandHandler("heraldoff", herald_off_command))
     app.add_handler(CommandHandler("heraldon", herald_on_command))
     app.add_handler(CommandHandler("toolkitstatus", toolkit_status_command))
+    app.add_handler(CommandHandler("payments", payments_command))
 
     app.add_handler(CallbackQueryHandler(handle_control_buttons, pattern=r"^(take|resume):"))
 
