@@ -12,6 +12,7 @@ from telegram.ext import ContextTypes
 import config
 import faq
 import conversations
+import followups
 import payments
 import settings
 
@@ -19,6 +20,7 @@ import settings
 _alerted = {}
 
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_STOP_RE = re.compile(r"\[STOP\]", re.IGNORECASE)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -77,6 +79,8 @@ async def _alert_once_a_day(bot, kind, text):
 
 
 async def _send_handoff(bot, chat_id, first_name, reason):
+    followups.set_status(chat_id, "handoff")
+
     recent = conversations.get_recent(chat_id, limit=6)
     lines = []
     for m in recent:
@@ -175,6 +179,7 @@ async def _send_texts(context, chat_id, connection_id, chunks):
 
 
 async def _deliver_materials(context, chat_id, connection_id, first_name, email):
+    followups.set_status(chat_id, "enrolled")
     link = os.environ.get("MATERIALS_LINK", "")
 
     if not link:
@@ -219,9 +224,13 @@ async def handle_business_message(update, context):
     if not connection_id:
         return
 
-    # Avoid responding to messages sent by the business account itself.
+    # Messages sent from the business account itself.
     if message.chat.type == "private" and message.from_user:
         if message.chat.id != message.from_user.id:
+            # If the owner typed this herself, stop automatic follow-ups here.
+            if getattr(message, "sender_business_bot", None) is None:
+                logging.info("Owner typed in chat %s", message.chat.id)
+                followups.set_status(message.chat.id, "handoff")
             return
 
     text = message.text.strip()
@@ -245,6 +254,9 @@ async def handle_business_message(update, context):
         if not is_new:
             # Telegram sent this exact message twice. Ignore it.
             return
+
+        # Restart this customer's follow-up clock.
+        followups.touch_user(chat_id, first_name, connection_id)
 
         # Global off switch (settings.txt, or /heraldoff)
         if not settings.is_on() or conversations.is_paused(0):
@@ -311,6 +323,13 @@ async def handle_business_message(update, context):
         )
 
         answer, source = faq.answer_question(text + system_note, first_name, history)
+
+        # [STOP] means the customer asked not to be contacted or said no.
+        stop = bool(_STOP_RE.search(answer))
+        answer = _STOP_RE.sub("", answer).strip()
+        if not answer:
+            answer = "Understood."
+
         chunks = _split_chunks(answer)
 
         last_sent_id = await _send_texts(context, chat_id, connection_id, chunks)
@@ -319,12 +338,16 @@ async def handle_business_message(update, context):
         conversations.save_message(
             chat_id, "assistant", "|||".join(chunks), last_sent_id
         )
+        followups.touch_bot(chat_id)
 
         # Tell the admins if Herald asked for a human.
         if source.startswith("handoff:"):
             await _send_handoff(
                 context.bot, chat_id, first_name, source[len("handoff:"):]
             )
+
+        if stop:
+            followups.set_status(chat_id, "stopped")
 
     except Exception as e:
         logging.exception("Failed to handle a Telegram Business message")
@@ -335,6 +358,8 @@ async def handle_business_message(update, context):
                 "Herald's Anthropic credits have run out, so she can't "
                 "reply. Please top up your credits.",
             )
+
+
 async def toolkit_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not config.is_admin(update.effective_user.id):
         return
@@ -360,3 +385,9 @@ async def payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         header = f"Flutterwave check failed: {e}\n\n"
     await update.message.reply_text(header + payments.recent_payments_text())
+
+
+async def followups_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not config.is_admin(update.effective_user.id):
+        return
+    await update.message.reply_text(followups.report_text())
