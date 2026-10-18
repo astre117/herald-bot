@@ -155,7 +155,7 @@ async def sync_job(context):
         return
 
     if first_run:
-        logging.info("Payment baseline saved (%d recent payments)", len(new))
+        print(f"Payment baseline saved ({len(new)} recent payments)")
         return
 
     for p in new:
