@@ -174,3 +174,41 @@ async def sync_job(context):
                 await context.bot.send_message(chat_id=admin_id, text=text)
             except Exception:
                 logging.exception("Could not notify admin %s", admin_id)
+
+
+
+def claim_email(email, chat_id):
+    """Returns 'ok', 'none' or 'taken'."""
+    email = email.strip().lower()
+
+    for attempt in range(2):
+        with closing(_conn()) as c:
+            rows = c.execute(
+                "SELECT id, claimed_by_chat_id FROM payments "
+                "WHERE email = ? AND is_toolkit = 1",
+                (email,),
+            ).fetchall()
+
+            if rows:
+                if any(row[1] == chat_id for row in rows):
+                    return "ok"
+                free = [row for row in rows if row[1] is None]
+                if free:
+                    c.execute(
+                        "UPDATE payments SET claimed_by_chat_id = ? WHERE id = ?",
+                        (chat_id, free[0][0]),
+                    )
+                    c.commit()
+                    return "ok"
+                return "taken"
+
+        if attempt == 0:
+            # Not in our records yet: ask Flutterwave about this email.
+            try:
+                for tx in _fetch(60, email=email):
+                    _record(tx)
+            except Exception:
+                logging.exception("Email lookup failed")
+                return "none"
+
+    return "none"
