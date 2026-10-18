@@ -350,3 +350,13 @@ async def link_check_job(context: ContextTypes.DEFAULT_TYPE):
     if warning:
         await _alert_once_a_day(context.bot, "link-warning", warning)
 
+
+async def payments_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not config.is_admin(update.effective_user.id):
+        return
+    try:
+        new, _ = await asyncio.to_thread(payments.sync_recent)
+        header = f"Checked Flutterwave now: {len(new)} new payment(s) found.\n\n"
+    except Exception as e:
+        header = f"Flutterwave check failed: {e}\n\n"
+    await update.message.reply_text(header + payments.recent_payments_text())
