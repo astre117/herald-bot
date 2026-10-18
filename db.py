@@ -7,7 +7,19 @@ import sqlite3
 from datetime import datetime
 from contextlib import contextmanager
 
-DB_PATH = "cohort_bot.db"
+import os
+import shutil
+
+_DATA_DIR = os.environ.get("DATA_DIR", "")
+if _DATA_DIR:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+    DB_PATH = os.path.join(_DATA_DIR, "cohort_bot.db")
+    # First run on the volume: start from the copy stored in the repo.
+    if not os.path.exists(DB_PATH) and os.path.exists("cohort_bot.db"):
+        shutil.copy("cohort_bot.db", DB_PATH)
+else:
+    DB_PATH = "cohort_bot.db"
+
 
 
 @contextmanager
