@@ -1,6 +1,8 @@
 import asyncio
 import html
 import logging
+import os
+import re
 from datetime import date
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -10,10 +12,13 @@ from telegram.ext import ContextTypes
 import config
 import faq
 import conversations
+import payments
 import settings
 
 # Remembers which alerts were already sent today, so you don't get spammed.
 _alerted = {}
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -150,6 +155,59 @@ def _typing_delay(chunk):
     return min(3.0, 1.0 + len(chunk) / 60)
 
 
+async def _send_texts(context, chat_id, connection_id, chunks):
+    """Sends each chunk as its own message with a typing pause."""
+    last_id = None
+    for chunk in chunks:
+        await context.bot.send_chat_action(
+            chat_id=chat_id,
+            action="typing",
+            business_connection_id=connection_id,
+        )
+        await asyncio.sleep(_typing_delay(chunk))
+        sent = await context.bot.send_message(
+            chat_id=chat_id,
+            text=chunk,
+            business_connection_id=connection_id,
+        )
+        last_id = sent.message_id
+    return last_id
+
+
+async def _deliver_materials(context, chat_id, connection_id, first_name, email):
+    link = os.environ.get("MATERIALS_LINK", "")
+
+    if not link:
+        chunks = ["Thanks, I can see your payment.", "Let me bring Coach Create in to send your materials."]
+        last_id = await _send_texts(context, chat_id, connection_id, chunks)
+        conversations.save_message(chat_id, "assistant", "|||".join(chunks), last_id)
+        await _send_handoff(
+            context.bot, chat_id, first_name,
+            f"Verified payment for {email} but MATERIALS_LINK is not set",
+        )
+        return
+
+    chunks = [
+        "Your payment is confirmed. Thank you!",
+        f"Here are your materials: {link}",
+        "Please keep them to yourself and don't share the link. Message me if anything doesn't open.",
+    ]
+    last_id = await _send_texts(context, chat_id, connection_id, chunks)
+
+    # The link itself is never stored in the conversation history.
+    conversations.save_message(
+        chat_id,
+        "assistant",
+        "Your payment is confirmed. Thank you!|||[Herald sent the toolkit materials link]|||"
+        "Please keep them to yourself and don't share the link.",
+        last_id,
+    )
+    await _notify_admins(
+        context.bot,
+        f"Materials sent to {first_name} (payment email: {email}).",
+    )
+
+
 async def handle_business_message(update, context):
     """Handle incoming messages from Telegram Business customers."""
     message = update.business_message
@@ -210,30 +268,52 @@ async def handle_business_message(update, context):
             )
             return
 
+        # Payment claim: the buyer sent an email address.
+        system_note = ""
+        email_match = _EMAIL_RE.search(text)
+        if email_match:
+            email = email_match.group(0)
+            result = await asyncio.to_thread(payments.claim_email, email, chat_id)
+
+            if result == "ok":
+                await _deliver_materials(
+                    context, chat_id, connection_id, first_name, email
+                )
+                return
+
+            if result == "taken":
+                chunks = [
+                    "I can see a payment for that email.",
+                    "I need Coach Create to check one thing before I send your materials.",
+                ]
+                last_id = await _send_texts(context, chat_id, connection_id, chunks)
+                conversations.save_message(
+                    chat_id, "assistant", "|||".join(chunks), last_id
+                )
+                await _send_handoff(
+                    context.bot, chat_id, first_name,
+                    f"Payment email {email} was already claimed by another Telegram account",
+                )
+                return
+
+            system_note = (
+                "\n\n[System note, not from the customer: the email above was "
+                "checked and no verified toolkit payment matches it. Do not say "
+                "any payment is confirmed. Tell them you cannot see it yet, ask "
+                "them to double-check the email used at checkout, mention it can "
+                "take a few minutes after paying, and add a handoff tag.]"
+            )
+
         await context.bot.send_chat_action(
             chat_id=chat_id,
             action="typing",
             business_connection_id=connection_id,
         )
 
-        answer, source = faq.answer_question(text, first_name, history)
+        answer, source = faq.answer_question(text + system_note, first_name, history)
         chunks = _split_chunks(answer)
 
-        last_sent_id = None
-        for i, chunk in enumerate(chunks):
-            if i > 0:
-                await context.bot.send_chat_action(
-                    chat_id=chat_id,
-                    action="typing",
-                    business_connection_id=connection_id,
-                )
-            await asyncio.sleep(_typing_delay(chunk))
-            sent = await context.bot.send_message(
-                chat_id=chat_id,
-                text=chunk,
-                business_connection_id=connection_id,
-            )
-            last_sent_id = sent.message_id
+        last_sent_id = await _send_texts(context, chat_id, connection_id, chunks)
 
         # Saved with ||| between chunks so Claude keeps seeing the format.
         conversations.save_message(
