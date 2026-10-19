@@ -13,6 +13,7 @@ import config
 import faq
 import conversations
 import followups
+import cohort
 import guard
 import payments
 import settings
@@ -309,7 +310,8 @@ async def handle_business_message(update, context):
                     f"Payment email {email} was already claimed by another Telegram account",
                 )
                 return
-
+            if await cohort.handle_claim(context, chat_id, connection_id, first_name, email):
+                return
             system_note = (
                 "\n\n[System note, not from the customer: the email above was "
                 "checked and no verified toolkit payment matches it. Do not say "
