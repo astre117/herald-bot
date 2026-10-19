@@ -119,6 +119,24 @@ def live_settings_text():
             "to pay, say you are bringing Coach Create in to sort the "
             "payment, and add the handoff tag."
         )
+        proof = v.get("proof_link", "").strip()
+        if proof:
+        lines.append(
+            f"- Proof link with student results: {proof}\n"
+            "  When someone asks for proof, results, testimonials or who the "
+            "students are, say private details cannot be shared, then send "
+            "this link so they can see the results themselves. Send it "
+            "exactly as written. Still state the conditions with any result "
+            "(contracts are not guaranteed, daily updates are expected, "
+            "results depend on effort). Do not send or describe screenshots."
+        )
+        else:
+        lines.append(
+            "- No proof link is available. For proof requests, share the "
+            "approved results in words, then say Coach Create can send more "
+            "and add the handoff tag."
+        )
+
 
     if v.get("announce_slots_left", "no").lower() == "yes" and info["left"] is not None:
         lines.append(
