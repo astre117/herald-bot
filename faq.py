@@ -207,12 +207,13 @@ def ask_sales(question, student_name, history):
 
     response = _client.messages.create(
         model="claude-haiku-5-5",
-        max_tokens=500,
+        max_tokens=2000,
         system=system_prompt,
         messages=messages,
     )
     raw = "".join(block.text for block in response.content if block.type == "text")
-    print(f"[sales] stop_reason={response.stop_reason} raw={raw!r}")
+    print(f"[sales] stop_reason={response.stop_reason} blocks={[b.type for b in response.content]} raw={raw!r}")
+
     return _clean_sales_reply(raw)
 
 
