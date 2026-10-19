@@ -213,6 +213,7 @@ async def _deliver_materials(context, chat_id, connection_id, first_name, email)
         context.bot,
         f"Materials sent to {first_name} (payment email: {email}).",
     )
+     followups.schedule_cohort_pitch(context, chat_id, connection_id, first_name)
 
 
 async def handle_business_message(update, context):
