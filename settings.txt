@@ -21,3 +21,7 @@ link_tier_4=
 link_tier_5=
 link_tier_6=
 proof_link=https://drive.google.com/drive/folders/1cdKgmhClK9Fh9N5X7wwEbYLmXfq6lWyb
+# Cohort payment links. Leave blank to turn off
+cohort_link_full=https://flutterwave.com/pay/full-payment
+cohort_link_split=https://flutterwave.com/pay/split-payment
+cohort_split_amount=37500
