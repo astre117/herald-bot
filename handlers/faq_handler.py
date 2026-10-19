@@ -13,8 +13,8 @@ import config
 import faq
 import conversations
 import followups
-import cohort
 import guard
+import cohort
 import payments
 import settings
 
@@ -213,7 +213,12 @@ async def _deliver_materials(context, chat_id, connection_id, first_name, email)
         context.bot,
         f"Materials sent to {first_name} (payment email: {email}).",
     )
-     followups.schedule_cohort_pitch(context, chat_id, connection_id, first_name)
+
+    # One gentle message about the Cohort, a few minutes later.
+    try:
+        followups.schedule_cohort_pitch(context, chat_id, connection_id, first_name)
+    except Exception:
+        logging.exception("Could not schedule the Cohort message")
 
 
 async def handle_business_message(update, context):
@@ -283,12 +288,22 @@ async def handle_business_message(update, context):
             )
             return
 
-        # Payment claim: the buyer sent an email address.
+        # What the system already knows about this customer's payments.
         system_note = guard.note_for(chat_id)
 
+        # Payment claim: the buyer sent an email address.
         email_match = _EMAIL_RE.search(text)
         if email_match:
             email = email_match.group(0)
+            already_toolkit = bool(guard.claimed_kinds(chat_id) & {1, 2})
+
+            # A toolkit buyer sending an email is most likely claiming the Cohort.
+            if already_toolkit:
+                if await cohort.handle_claim(
+                    context, chat_id, connection_id, first_name, email
+                ):
+                    return
+
             result = await asyncio.to_thread(payments.claim_email, email, chat_id)
 
             if result == "ok":
@@ -311,11 +326,17 @@ async def handle_business_message(update, context):
                     f"Payment email {email} was already claimed by another Telegram account",
                 )
                 return
-            if await cohort.handle_claim(context, chat_id, connection_id, first_name, email):
-                return
-            system_note = (
+
+            # Not a toolkit payment: maybe it is a Cohort payment.
+            if not already_toolkit:
+                if await cohort.handle_claim(
+                    context, chat_id, connection_id, first_name, email
+                ):
+                    return
+
+            system_note += (
                 "\n\n[System note, not from the customer: the email above was "
-                "checked and no verified toolkit payment matches it. Do not say "
+                "checked and no verified payment matches it. Do not say "
                 "any payment is confirmed. Tell them you cannot see it yet, ask "
                 "them to double-check the email used at checkout, mention it can "
                 "take a few minutes after paying, and add a handoff tag.]"
@@ -364,6 +385,10 @@ async def handle_business_message(update, context):
                 "reply. Please top up your credits.",
             )
 
+
+# ---------------------------------------------------------------------------
+# Admin commands and background jobs
+# ---------------------------------------------------------------------------
 
 async def toolkit_status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user or not config.is_admin(update.effective_user.id):
