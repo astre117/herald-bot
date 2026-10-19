@@ -53,6 +53,7 @@ def reset_chat(chat_id):
             "DELETE FROM conversations WHERE chat_id = ?",
             "DELETE FROM prospects WHERE chat_id = ?",
             "DELETE FROM cohort_pitched WHERE chat_id = ?",
+            "DELETE FROM cohort_pitched WHERE chat_id = ?",
             "DELETE FROM paused_chats WHERE chat_id = ?",
             "UPDATE payments SET claimed_by_chat_id = NULL WHERE claimed_by_chat_id = ?",
         ):
