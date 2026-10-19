@@ -92,6 +92,17 @@ def status_report():
         "Payment link for this tier: " + ("set" if info["link"] else "MISSING")
     )
     lines.append("Announcing slots left: " + v.get("announce_slots_left", "no"))
+    lines.append(
+        "Cohort links: full "
+        + ("set" if v.get("cohort_link_full", "").strip() else "MISSING")
+        + ", split "
+        + ("set" if v.get("cohort_link_split", "").strip() else "MISSING")
+    )
+    full, split = payments._cohort_amounts()
+    if full:
+        lines.append(
+            f"Cohort amounts she watches for: ₦{full:,} full, ₦{split:,} per installment"
+        )
     warning = next_link_warning()
     if warning:
         lines.append(warning)
@@ -160,6 +171,41 @@ def live_settings_text():
             "with Coach Create and add the handoff tag."
         )
 
+    full_link = v.get("cohort_link_full", "").strip()
+    split_link = v.get("cohort_link_split", "").strip()
+    if full_link or split_link:
+        parts = [
+            "- Cohort payment links (send only after the buyer says they "
+            "want to join and you have explained the options):"
+        ]
+        if full_link:
+            parts.append(f"  Full payment link: {full_link}")
+        if split_link:
+            parts.append(
+                f"  Installment plan link (collects the first payment): {split_link}"
+            )
+        parts.append(
+            "  If they have not said which option they want, briefly explain "
+            "the options and ask which they prefer. Then send only the link "
+            "they chose, exactly as written. For the installment plan, say "
+            "the first payment is made through the link and the second "
+            "payment is charged automatically to the same account later, "
+            "with a reminder sent before it is charged. Do not state an "
+            "exact date. Never change the plan; exceptions go to Coach "
+            "Create (handoff tag). Cohort payments are checked by the system "
+            "when the buyer sends the email they used at checkout. The "
+            "system replies by itself, so never confirm a Cohort payment "
+            "yourself and never say access is set up. If someone says they "
+            "paid for the Cohort, ask for the email they used at checkout."
+        )
+        lines.append("\n".join(parts))
+    else:
+        lines.append(
+            "- No Cohort payment links are available. If someone is ready to "
+            "join the Cohort, say you are bringing Coach Create in and add "
+            "the handoff tag."
+        )
+
     try:
         taken = int(v["cohort_free_seats_taken"])
         left = max(0, 150 - taken)
@@ -175,8 +221,8 @@ def live_settings_text():
         "counts are unavailable):\n"
         + "\n".join(lines)
         + "\n- Never describe any figure as verified or verifiable."
-        + "\n- After a buyer says they have paid, ask for the email they used "
-        "at checkout. The system checks it and sends the materials "
-        "automatically. Never send the materials link yourself and never "
-        "say a payment is confirmed.\n"
+        + "\n- After a buyer says they have paid for the toolkit, ask for the "
+        "email they used at checkout. The system checks it and sends the "
+        "materials automatically. Never send the materials link yourself and "
+        "never say a payment is confirmed.\n"
     )
