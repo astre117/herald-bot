@@ -280,3 +280,90 @@ def report_text():
         + "\n\nStep 0 = nothing sent yet, 1 = nudge done or skipped, "
         "2 = day 3 reminder sent, 3 = day 7 reminder sent."
     )
+  
+
+COHORT_PITCH_INSTRUCTION = (
+    "This customer's toolkit payment was verified by the system and their "
+    "materials were delivered a few minutes ago. That is correct and final; "
+    "never retract it. Write ONE short text from Herald (2 to 3 short "
+    "sentences). Warmly check that the materials opened, then mention in one "
+    "sentence that Coach Create also runs the Cohort, the guided version with "
+    "feedback at every stage, in case they want more than self-paced. Ask "
+    "exactly one question, such as where they are in their writing or whether "
+    "they would like to hear how the Cohort works. Do NOT send any link, "
+    "price or guarantee yet. No pressure, no false urgency, no slot counts, "
+    "no introduction, no discount for toolkit buyers, no income promises. "
+    "Output only the message text. If this would be unwelcome, output "
+    "exactly SKIP."
+)
+
+
+def _status(chat_id):
+    with closing(_conn()) as c:
+        row = c.execute(
+            "SELECT status FROM prospects WHERE chat_id = ?", (chat_id,)
+        ).fetchone()
+    return row[0] if row else None
+
+
+def schedule_cohort_pitch(context, chat_id, connection_id, first_name):
+    """About 5 minutes after the toolkit is delivered, sends ONE gentle
+    message about the Cohort. Only once per customer."""
+    with closing(_conn()) as c:
+        c.execute(
+            "CREATE TABLE IF NOT EXISTS cohort_pitched (chat_id INTEGER PRIMARY KEY)"
+        )
+        cur = c.execute(
+            "INSERT OR IGNORE INTO cohort_pitched (chat_id) VALUES (?)", (chat_id,)
+        )
+        c.commit()
+        if cur.rowcount != 1:
+            return
+
+    try:
+        delay = float(os.environ.get("COHORT_PITCH_DELAY_SECONDS", "300"))
+    except ValueError:
+        delay = 300.0
+
+    context.job_queue.run_once(
+        cohort_pitch_job,
+        when=delay,
+        data={
+            "chat_id": chat_id,
+            "connection_id": connection_id,
+            "name": first_name,
+        },
+    )
+
+
+async def cohort_pitch_job(context):
+    data = context.job.data
+    chat_id = data["chat_id"]
+    connection_id = data["connection_id"]
+    name = data["name"]
+    try:
+        if not settings.is_on() or conversations.is_paused(0):
+            return
+        if conversations.is_paused(chat_id) or _status(chat_id) == "stopped":
+            return
+        if conversations.count_replies_today() >= settings.daily_cap():
+            return
+
+        history = conversations.get_recent(chat_id, limit=12)
+        text = await asyncio.to_thread(
+            _generate, history, name, COHORT_PITCH_INSTRUCTION
+        )
+        if not text or text.upper().startswith("SKIP"):
+            return
+
+        await context.bot.send_chat_action(
+            chat_id=chat_id, action="typing", business_connection_id=connection_id
+        )
+        await asyncio.sleep(2)
+        sent = await context.bot.send_message(
+            chat_id=chat_id, text=text, business_connection_id=connection_id
+        )
+        conversations.save_message(chat_id, "assistant", text, sent.message_id)
+        touch_bot(chat_id)
+    except Exception:
+        logging.exception("Cohort pitch failed for chat %s", chat_id)
