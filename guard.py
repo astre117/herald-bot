@@ -6,28 +6,44 @@ import db
 import payments
 
 
-def has_verified_payment(chat_id):
+def claimed_kinds(chat_id):
     with closing(payments._conn()) as c:
-        row = c.execute(
-            "SELECT 1 FROM payments WHERE claimed_by_chat_id = ? LIMIT 1",
+        rows = c.execute(
+            "SELECT DISTINCT is_toolkit FROM payments WHERE claimed_by_chat_id = ?",
             (chat_id,),
-        ).fetchone()
-    return row is not None
+        ).fetchall()
+    return {r[0] for r in rows}
 
 
 def note_for(chat_id):
     """Tells Herald the truth about customers whose payment was verified."""
-    if has_verified_payment(chat_id):
-        return (
-            "\n\n[System note, not from the customer: this customer's payment "
-            "HAS been verified by the system, and the toolkit materials link "
-            "HAS already been delivered to them. That is correct and final. "
-            "Never say you are checking their payment and never retract or "
-            "correct it. If they say the materials do not open, say you are "
-            "bringing Coach Create in and add the handoff tag. Otherwise "
-            "answer their message normally and warmly.]"
+    kinds = claimed_kinds(chat_id)
+    note = ""
+
+    if kinds & {1, 2}:
+        note += (
+            "\n\n[System note, not from the customer: this customer's toolkit "
+            "payment HAS been verified by the system, and the toolkit "
+            "materials link HAS already been delivered to them. That is "
+            "correct and final. Never say you are checking their payment and "
+            "never retract or correct it. If they say the materials do not "
+            "open, say you are bringing Coach Create in and add the handoff "
+            "tag. Otherwise answer their message normally and warmly.]"
         )
-    return ""
+
+    if kinds & {3, 4}:
+        note += (
+            "\n\n[System note, not from the customer: this customer's Cohort "
+            "payment HAS been detected by the system, and Coach Create has "
+            "been alerted. She will confirm their spot and set up their "
+            "access personally. Never say their access is already set up, "
+            "and never say you are still checking the payment or retract "
+            "this. Answer their questions warmly. For anything about access "
+            "or onboarding, say Coach Create will handle it and add the "
+            "handoff tag.]"
+        )
+
+    return note
 
 
 def reset_chat(chat_id):
@@ -36,6 +52,7 @@ def reset_chat(chat_id):
         for sql in (
             "DELETE FROM conversations WHERE chat_id = ?",
             "DELETE FROM prospects WHERE chat_id = ?",
+            "DELETE FROM cohort_pitched WHERE chat_id = ?",
             "DELETE FROM paused_chats WHERE chat_id = ?",
             "UPDATE payments SET claimed_by_chat_id = NULL WHERE claimed_by_chat_id = ?",
         ):
