@@ -15,6 +15,9 @@ import db
 # The six toolkit tier prices, in naira.
 TOOLKIT_AMOUNTS = {15000, 20000, 25000, 30000, 35000, 40000}
 
+# is_toolkit values: 0 other, 1 toolkit sale, 2 test payment,
+# 3 Cohort (full payment), 4 Cohort (installment plan)
+
 
 def _conn():
     c = sqlite3.connect(db.DB_PATH)
@@ -94,24 +97,40 @@ def _near(value, target):
     return target <= value <= target * 1.04
 
 
+def _cohort_amounts():
+    """Full price and installment amount, read from settings.txt."""
+    try:
+        import settings  # imported here to avoid a circular import
+
+        v = settings._read()
+        full = int(v["cohort_price"])
+        split = int(v.get("cohort_split_amount") or (full + 15000) // 2)
+        return full, split
+    except Exception:
+        return None, None
+
+
 def _is_toolkit(amounts, tx_ref):
-    """Returns 1 for a toolkit sale, 2 for a test payment, 0 for anything else.
-    Test mode: set TEST_PAYMENT_AMOUNT in Railway (for example 300).
-    Optional: set TOOLKIT_TXREF_PREFIX if toolkit payments share a reference
-    prefix, so other payments are ignored."""
+    """Classifies a payment. See the list of values near the top."""
     test_amount = os.environ.get("TEST_PAYMENT_AMOUNT", "").strip()
     if test_amount.isdigit():
         target = int(test_amount)
         if any(_near(a, target) for a in amounts):
             return 2
 
-    if not any(_near(a, t) for a in amounts for t in TOOLKIT_AMOUNTS):
-        return 0
+    if any(_near(a, t) for a in amounts for t in TOOLKIT_AMOUNTS):
+        prefix = os.environ.get("TOOLKIT_TXREF_PREFIX", "")
+        if prefix and not (tx_ref or "").startswith(prefix):
+            return 0
+        return 1
 
-    prefix = os.environ.get("TOOLKIT_TXREF_PREFIX", "")
-    if prefix and not (tx_ref or "").startswith(prefix):
-        return 0
-    return 1
+    full, split = _cohort_amounts()
+    if full and any(_near(a, full) for a in amounts):
+        return 3
+    if split and any(_near(a, split) for a in amounts):
+        return 4
+
+    return 0
 
 
 def _record(row):
@@ -140,13 +159,13 @@ def _record(row):
         )
         c.commit()
         if cur.rowcount != 1:
-            # Already recorded earlier. If it was ignored before test mode
-            # was on, upgrade it so it can be alerted and claimed.
-            if is_toolkit == 2:
+            # Already recorded earlier. If it was ignored before, upgrade it
+            # so it can be alerted and claimed.
+            if is_toolkit in (2, 3, 4):
                 up = c.execute(
-                    "UPDATE payments SET is_toolkit = 2 "
+                    "UPDATE payments SET is_toolkit = ? "
                     "WHERE flw_id = ? AND is_toolkit = 0",
-                    (flw_id,),
+                    (is_toolkit, flw_id),
                 )
                 c.commit()
                 if up.rowcount != 1:
@@ -164,10 +183,18 @@ def _record(row):
 
 
 def toolkit_count():
-    """Real toolkit sales only. Test payments are not counted."""
+    """Real toolkit sales only. Test and Cohort payments are not counted."""
     with closing(_conn()) as c:
         return c.execute(
             "SELECT COUNT(*) FROM payments WHERE is_toolkit = 1"
+        ).fetchone()[0]
+
+
+def installments_for(email):
+    with closing(_conn()) as c:
+        return c.execute(
+            "SELECT COUNT(*) FROM payments WHERE is_toolkit = 4 AND email = ?",
+            ((email or "").lower(),),
         ).fetchone()[0]
 
 
@@ -180,7 +207,7 @@ def recent_payments_text(limit=6):
         ).fetchall()
     if not rows:
         return "No payments recorded yet."
-    kinds = {0: "other", 1: "toolkit", 2: "TEST"}
+    kinds = {0: "other", 1: "toolkit", 2: "TEST", 3: "cohort-full", 4: "cohort-split"}
     lines = []
     for amount, kind, email, ref, created in rows:
         lines.append(
@@ -218,12 +245,30 @@ async def sync_job(context):
         return
 
     for p in new:
-        if not p["is_toolkit"]:
+        kind = p["is_toolkit"]
+        if not kind:
             continue
-        if p["is_toolkit"] == 2:
+
+        if kind == 2:
             note = "TEST payment. Not counted toward slots."
-        else:
+        elif kind == 1:
             note = f"Toolkit payment #{toolkit_count()}."
+        elif kind == 3:
+            note = (
+                "COHORT payment (full). Please confirm and onboard them. "
+                "Herald will acknowledge it when the buyer messages her "
+                "with this email."
+            )
+        else:
+            n = installments_for(p["email"])
+            if n <= 1:
+                note = (
+                    "COHORT installment plan started (payment 1 of 2). "
+                    "Please confirm and onboard them."
+                )
+            else:
+                note = f"COHORT installment payment #{n} received (recurring charge)."
+
         text = (
             f"New payment: ₦{p['amount']:,} from {p['email'] or 'unknown email'}.\n"
             f"{note}\nRef: {p['tx_ref']}"
@@ -235,16 +280,17 @@ async def sync_job(context):
                 logging.exception("Could not notify admin %s", admin_id)
 
 
-def claim_email(email, chat_id):
-    """Returns 'ok', 'none' or 'taken'."""
+def claim_email_kinds(email, chat_id, kinds):
+    """Returns 'ok', 'none' or 'taken' for payments of the given kinds."""
     email = email.strip().lower()
+    marks = ",".join("?" * len(kinds))
 
     for attempt in range(2):
         with closing(_conn()) as c:
             rows = c.execute(
                 "SELECT id, claimed_by_chat_id FROM payments "
-                "WHERE email = ? AND is_toolkit IN (1, 2)",
-                (email,),
+                f"WHERE email = ? AND is_toolkit IN ({marks})",
+                (email, *kinds),
             ).fetchall()
 
             if rows:
@@ -270,3 +316,8 @@ def claim_email(email, chat_id):
                 return "none"
 
     return "none"
+
+
+def claim_email(email, chat_id):
+    """Toolkit (and test) payments."""
+    return claim_email_kinds(email, chat_id, (1, 2))
