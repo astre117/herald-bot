@@ -23,7 +23,7 @@ _STOPWORDS = {
     "can", "will", "it", "this", "that", "get", "got",
 }
 
-_HANDOFF_RE = re.compile(r"\[HANDOFF:([^\]]*)\]", re.IGNORECASE)
+_HANDOFF_RE = re.compile(r"\[HANDOFF:([^\]]*)(?:\]|$)", re.IGNORECASE)
 
 
 def _tokenize(text):
@@ -212,7 +212,9 @@ def ask_sales(question, student_name, history):
         messages=messages,
     )
     raw = "".join(block.text for block in response.content if block.type == "text")
+    print(f"[sales] stop_reason={response.stop_reason} raw={raw!r}")
     return _clean_sales_reply(raw)
+
 
 
 def answer_question(question, student_name=None, history=None):
