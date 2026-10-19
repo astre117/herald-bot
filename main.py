@@ -11,6 +11,8 @@ import db
 import conversations
 import payments
 import followups
+import guard
+
 from keep_alive import keep_alive
 
 import conversations
@@ -167,6 +169,8 @@ def main():
     app.add_handler(CommandHandler("toolkitstatus", toolkit_status_command))
     app.add_handler(CommandHandler("payments", payments_command))
     app.add_handler(CommandHandler("followups", followups_command))
+    app.add_handler(CommandHandler("resetchat", guard.resetchat_command))
+
 
     app.add_handler(CallbackQueryHandler(handle_control_buttons, pattern=r"^(take|resume):"))
 

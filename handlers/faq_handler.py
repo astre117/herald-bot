@@ -13,6 +13,7 @@ import config
 import faq
 import conversations
 import followups
+import guard
 import payments
 import settings
 
@@ -281,7 +282,8 @@ async def handle_business_message(update, context):
             return
 
         # Payment claim: the buyer sent an email address.
-        system_note = ""
+        system_note = guard.note_for(chat_id)
+
         email_match = _EMAIL_RE.search(text)
         if email_match:
             email = email_match.group(0)
