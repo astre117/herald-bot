@@ -206,7 +206,7 @@ def ask_sales(question, student_name, history):
     messages.append({"role": "user", "content": user_msg})
 
     response = _client.messages.create(
-        model="claude-haiku-5-5",
+         model="claude-sonnet-4-6",
         max_tokens=2000,
         system=system_prompt,
         messages=messages,
