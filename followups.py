@@ -153,7 +153,7 @@ def _generate(history, name, instruction):
         }
     )
     response = faq._client.messages.create(
-        model="claude-haiku-5-5",
+         model="claude-sonnet-4-6",
         max_tokens=1000,
         system=system_prompt,
         messages=messages,
